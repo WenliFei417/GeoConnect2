@@ -17,7 +17,7 @@ const DB = {
   // Admin list (mirrors ADMIN_USERS env var from the original backend)
   admins: new Set(["kimi"]),
   postIdSeq: 100,
-  posts: [
+  seedPosts: [
     // ---- Syracuse area (dense cluster) ----
     { id: "1",  user: "kimi",    message: "Beautiful sunset at Onondaga Lake! 🌅",                  location: { lat: 43.0735, lon: -76.1743 }, url: "https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=400&h=300&fit=crop" },
     { id: "2",  user: "alice",   message: "Studying hard at Syracuse University library 📚",         location: { lat: 43.0382, lon: -76.1326 } },
@@ -39,7 +39,35 @@ const DB = {
     { id: "17", user: "alice",   message: "Pike Place Market — freshest seafood ever 🐟",            location: { lat: 47.6097, lon: -122.3425 } },
     { id: "18", user: "kimi",    message: "Hiking the Hollywood Hills, amazing views of LA 🌴",      location: { lat: 34.1341, lon: -118.3215 }, url: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=300&fit=crop" },
   ],
+  
+  // Runtime posts array — loaded from localStorage or initialized from seedPosts
+  posts: [],
 };
+
+// --- localStorage persistence ---
+function loadPosts() {
+  try {
+    const saved = localStorage.getItem("gc_posts");
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        DB.posts = parsed;
+        // Restore postIdSeq to avoid id collisions
+        const maxId = Math.max(...DB.posts.map((p) => Number(p.id) || 0));
+        if (maxId >= DB.postIdSeq) DB.postIdSeq = maxId + 1;
+        return;
+      }
+    }
+  } catch {}
+  // First visit or corrupted data — use seed data
+  DB.posts = JSON.parse(JSON.stringify(DB.seedPosts));
+}
+function savePosts() {
+  try { localStorage.setItem("gc_posts", JSON.stringify(DB.posts)); } catch {}
+}
+// Initialize posts on script load
+loadPosts();
+const SEED_POST_IDS = new Set(DB.seedPosts.map((p) => p.id));
 
 // ===== Mock API Layer =====
 // These functions replace the original fetch() calls to the Go backend.
@@ -76,6 +104,7 @@ const MockAPI = {
     const id = String(++DB.postIdSeq);
     const p = { id, user, message, location: { lat: Number(lat), lon: Number(lon) } };
     DB.posts.unshift(p);
+    savePosts();
     return { ok: true, text: '{"status":"ok"}' };
   },
 
@@ -97,12 +126,15 @@ const MockAPI = {
     return results.slice(0, limit);
   },
 
-  deletePost(id, username, isAdmin) {
+  deletePost(id) {
     const idx = DB.posts.findIndex((p) => p.id === id);
     if (idx === -1) return { ok: false, status: 404, text: "post not found" };
     const p = DB.posts[idx];
-    if (p.user !== username && !isAdmin) return { ok: false, status: 403, text: "forbidden: not the owner or admin" };
+    if (SEED_POST_IDS.has(p.id)) {
+      return { ok: false, status: 403, text: "seed data cannot be deleted" };
+    }
     DB.posts.splice(idx, 1);
+    savePosts();
     return { ok: true, text: '{"status":"deleted"}' };
   },
 };
@@ -119,12 +151,17 @@ function haversine(lat1, lon1, lat2, lon2) {
 const authInfo = $("#auth-info");
 const btnLogout = $("#btn-logout");
 const btnLoginLink = $("#btn-login-link");
+const btnJumpCompose = $("#btn-jump-compose");
+const btnJumpFeed = $("#btn-jump-feed");
 const formPost = $("#form-post");
 const postMsg = $("#post-msg");
 const btnUseLoc = $("#btn-use-location");
+const btnPickOnMap = $("#btn-pick-on-map");
+const postIdentity = $("#post-identity");
+const postLocationStatus = $("#post-location-status");
 const formSearch = $("#form-search");
 const btnSearchMyLoc = $("#btn-search-my-loc");
-const btnFillFromPost = $("#btn-fill-from-post");
+const btnSearchMapCenter = $("#btn-search-map-center");
 const searchMsg = $("#search-msg");
 const results = $("#results");
 const selectState = $("#select-state");
@@ -147,9 +184,13 @@ function setToken(t) {
 function renderAuthState() {
   const t = getToken();
   const u = getCurrentUsername();
-  authInfo.textContent = t ? `Logged in as ${u}` : "Not logged in";
+  authInfo.textContent = t ? `Logged in as ${u}` : "Browsing as Anonymous";
+  if (postIdentity) {
+    postIdentity.textContent = t ? `Posting as ${u}` : "Posting as Anonymous";
+  }
   if (btnLogout) btnLogout.style.display = t ? "inline-block" : "none";
-  if (btnLoginLink) btnLoginLink.style.display = t ? "none" : "inline-block";
+  if (btnLoginLink) btnLoginLink.style.display = "inline-flex";
+  if (btnLoginLink) btnLoginLink.textContent = t ? "Switch account" : "Login";
 }
 function getCurrentUsername() {
   const t = getToken();
@@ -180,6 +221,8 @@ let map, markersLayer;
 let allowFitOnce = true;
 let searchSeq = 0;
 let suppressNextViewport = false;
+let selectedPostMarker = null;
+let pendingMapPick = false;
 
 function initMap() {
   if (map) return;
@@ -192,6 +235,13 @@ function initMap() {
   map.on("moveend", () => {
     if (suppressNextViewport) { suppressNextViewport = false; return; }
     debouncedViewport();
+  });
+  map.on("click", (e) => {
+    setPostLocation(e.latlng.lat, e.latlng.lng, "Location picked from map.");
+    if (pendingMapPick) {
+      setMsg(postMsg, "Location selected. You can post now.", true);
+      pendingMapPick = false;
+    }
   });
   viewportSearch();
 }
@@ -222,10 +272,48 @@ function renderOnMap(items, fit = true) {
   }
 }
 
+function setPostLocation(lat, lon, msg = "Location selected.") {
+  const latInput = formPost.querySelector('input[name="lat"]');
+  const lonInput = formPost.querySelector('input[name="lon"]');
+  latInput.value = Number(lat).toFixed(6);
+  lonInput.value = Number(lon).toFixed(6);
+  if (postLocationStatus) {
+    postLocationStatus.textContent = `Selected location: ${fmt(lat)}, ${fmt(lon)}`;
+  }
+  if (map) {
+    if (selectedPostMarker) {
+      selectedPostMarker.setLatLng([lat, lon]);
+    } else {
+      selectedPostMarker = L.circleMarker([lat, lon], {
+        radius: 8,
+        weight: 2,
+        color: "#1f7a8c",
+        fillColor: "#1f7a8c",
+        fillOpacity: 0.25,
+      }).addTo(map);
+    }
+  }
+  if (msg) setMsg(postMsg, msg, true);
+}
+
+function setSearchLocation(lat, lon) {
+  formSearch.querySelector('input[name="lat"]').value = Number(lat).toFixed(6);
+  formSearch.querySelector('input[name="lon"]').value = Number(lon).toFixed(6);
+}
+
+function runNearbySearch(lat, lon, rangeOverride) {
+  const range = rangeOverride || formSearch.querySelector('select[name="range"]').value || 50;
+  setSearchLocation(lat, lon);
+  const arr = MockAPI.search({ lat, lon, range });
+  renderResults(arr);
+  renderOnMap(arr, true);
+  setMsg(searchMsg, `Found ${arr.length} result(s).`, true);
+}
+
 // ===== Viewport search (now uses MockAPI instead of fetch) =====
 function viewportSearch() {
   const seq = ++searchSeq;
-  if (!map || !getToken()) return;
+  if (!map) return;
   const b = map.getBounds();
   const arr = MockAPI.search({
     mode: "viewport",
@@ -294,7 +382,6 @@ const stateBounds = {
 
 function stateSearch(code) {
   if (!code || !stateBounds[code]) return;
-  if (!getToken()) { setMsg(searchMsg, "Please log in first.", false); return; }
   if (!map) initMap();
   const b = stateBounds[code];
   const bounds = [[b.s, b.w], [b.n, b.e]];
@@ -335,37 +422,53 @@ function debounce(fn, wait) {
 
 // Use my location (post form)
 btnUseLoc.addEventListener("click", async () => {
-  const latInput = formPost.querySelector('input[name="lat"]');
-  const lonInput = formPost.querySelector('input[name="lon"]');
   setMsg(postMsg, "Getting location...");
   try {
     const pos = await getCurrentPosition();
-    latInput.value = pos.coords.latitude.toFixed(6);
-    lonInput.value = pos.coords.longitude.toFixed(6);
-    setMsg(postMsg, "Location filled.");
-  } catch (e) { setMsg(postMsg, "Failed: " + e.message, false); }
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    setPostLocation(lat, lon, "Current location selected.");
+    if (!map) initMap();
+    map.flyTo([lat, lon], 13);
+  } catch (e) {
+    setMsg(postMsg, "Failed: " + e.message, false);
+  }
 });
 
-// Post form submission — now uses MockAPI
+if (btnPickOnMap) {
+  btnPickOnMap.addEventListener("click", () => {
+    pendingMapPick = true;
+    setMsg(postMsg, "Click anywhere on the map to choose a location.", true);
+    const mapCard = document.getElementById("map");
+    if (mapCard) mapCard.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+
 formPost.addEventListener("submit", (e) => {
   e.preventDefault();
-  if (!getToken()) { setMsg(postMsg, "Please log in first.", false); return; }
   const fd = new FormData(formPost);
-  const res = MockAPI.post(getCurrentUsername(), fd.get("message"), fd.get("lat"), fd.get("lon"));
-  if (!res.ok) { setMsg(postMsg, "Post failed: " + res.text, false); return; }
-  setMsg(postMsg, "Post successful.", true);
+  const lat = fd.get("lat");
+  const lon = fd.get("lon");
+  if (!lat || !lon) {
+    setMsg(postMsg, "Please choose a location first.", false);
+    return;
+  }
+  const username = getCurrentUsername() || "Anonymous";
+  const res = MockAPI.post(username, fd.get("message"), lat, lon);
+  if (!res.ok) {
+    setMsg(postMsg, "Post failed: " + res.text, false);
+    return;
+  }
+  setMsg(postMsg, username === "Anonymous" ? "Anonymous post published." : "Post successful.", true);
   formPost.reset();
-  // Refresh map
+  formPost.querySelector('input[name="lat"]').value = "";
+  formPost.querySelector('input[name="lon"]').value = "";
+  if (postLocationStatus) postLocationStatus.textContent = "No location selected yet.";
+  if (selectedPostMarker && map) {
+    map.removeLayer(selectedPostMarker);
+    selectedPostMarker = null;
+  }
   viewportSearch();
-});
-
-// Copy coords from post form to search form
-btnFillFromPost.addEventListener("click", () => {
-  const lat = formPost.querySelector('input[name="lat"]').value;
-  const lon = formPost.querySelector('input[name="lon"]').value;
-  formSearch.querySelector('input[name="lat"]').value = lat;
-  formSearch.querySelector('input[name="lon"]').value = lon;
-  setMsg(searchMsg, "Copied coordinates.");
 });
 
 // Use my location (search form)
@@ -373,29 +476,43 @@ btnSearchMyLoc.addEventListener("click", async () => {
   setMsg(searchMsg, "Getting location...");
   try {
     const pos = await getCurrentPosition();
-    formSearch.querySelector('input[name="lat"]').value = pos.coords.latitude.toFixed(6);
-    formSearch.querySelector('input[name="lon"]').value = pos.coords.longitude.toFixed(6);
-    setMsg(searchMsg, "Location filled.");
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    setSearchLocation(lat, lon);
+    setMsg(searchMsg, "Searching near your current location.", true);
     if (!map) initMap();
-    map.flyTo([pos.coords.latitude, pos.coords.longitude], 13);
-    setTimeout(() => viewportSearch(), 450);
-  } catch (e) { setMsg(searchMsg, "Failed: " + e.message, false); }
+    map.flyTo([lat, lon], 13);
+    runNearbySearch(lat, lon);
+  } catch (e) {
+    setMsg(searchMsg, "Failed: " + e.message, false);
+  }
 });
+
+if (btnSearchMapCenter) {
+  btnSearchMapCenter.addEventListener("click", () => {
+    if (!map) initMap();
+    const center = map.getCenter();
+    setMsg(searchMsg, "Searching around the current map center.", true);
+    runNearbySearch(center.lat, center.lng);
+  });
+}
 
 // State selector
 if (btnStateGo) btnStateGo.addEventListener("click", () => { stateSearch((selectState && selectState.value) || ""); });
 if (selectState) selectState.addEventListener("change", () => { if (selectState.value) stateSearch(selectState.value); });
 
-// Search form submission — now uses MockAPI
 formSearch.addEventListener("submit", (e) => {
   e.preventDefault();
-  results.innerHTML = "";
-  if (!getToken()) { setMsg(searchMsg, "Please log in first.", false); return; }
+  if (!map) initMap();
   const fd = new FormData(formSearch);
-  const arr = MockAPI.search({ lat: fd.get("lat"), lon: fd.get("lon"), range: fd.get("range") });
-  renderResults(arr);
-  renderOnMap(arr, true);
-  setMsg(searchMsg, `Found ${arr.length} result(s).`, true);
+  const lat = Number(fd.get("lat"));
+  const lon = Number(fd.get("lon"));
+  if (Number.isFinite(lat) && Number.isFinite(lon)) {
+    runNearbySearch(lat, lon, fd.get("range"));
+    return;
+  }
+  const center = map.getCenter();
+  runNearbySearch(center.lat, center.lng, fd.get("range"));
 });
 
 // ===== Render search results =====
@@ -407,39 +524,65 @@ function renderResults(items) {
     const imgHtml = p.url ? `<img src="${escapeHtml(p.url)}" alt="image" />` : "";
     div.innerHTML = `${imgHtml}
       <div class="result-meta">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-          <strong>${escapeHtml(p.user || "")}</strong>
-          <span style="font-size:12px;color:#888;">${p.id ? escapeHtml(p.id) : ""}</span>
+        <div class="result-top">
+          <strong class="result-user">${escapeHtml(p.user || "")}</strong>
+          <span class="result-id">${p.id ? `#${escapeHtml(p.id)}` : ""}</span>
         </div>
-        <div>${escapeHtml(p.message || "")}</div>
-        <div>(${fmt(p.location?.lat)}, ${fmt(p.location?.lon)})</div>
-        <div class="actions"></div>
+        <div class="result-message">${escapeHtml(p.message || "")}</div>
+        <div class="result-location">${fmt(p.location?.lat)}, ${fmt(p.location?.lon)}</div>
+        <div class="actions result-actions"></div>
       </div>`;
     results.appendChild(div);
 
-    const currentUser = getCurrentUsername();
-    const isAdmin = getIsAdmin();
-    if (p.id && ((currentUser && p.user === currentUser) || isAdmin)) {
-      const actions = div.querySelector(".actions");
+    const isSeedPost = p.id && SEED_POST_IDS.has(p.id);
+    const actions = div.querySelector(".actions");
+
+    if (p.id && !isSeedPost) {
       const delBtn = document.createElement("button");
       delBtn.textContent = "Delete";
       delBtn.style.marginTop = "6px";
       delBtn.addEventListener("click", () => {
-        const res = MockAPI.deletePost(p.id, currentUser, isAdmin);
+        const res = MockAPI.deletePost(p.id);
         if (!res.ok) { alert("Delete failed: " + res.text); return; }
         if (div.parentNode) div.parentNode.removeChild(div);
-        // Refresh map
         viewportSearch();
       });
       actions.appendChild(delBtn);
+    } else if (isSeedPost) {
+      const lockText = document.createElement("span");
+      lockText.textContent = "Seed data";
+      lockText.style.fontSize = "12px";
+      lockText.style.color = "#8a97a8";
+      actions.appendChild(lockText);
     }
   });
 }
 
 // ===== Init =====
 renderAuthState();
+
+if (btnJumpCompose) {
+  btnJumpCompose.addEventListener("click", () => {
+    const composeCard = document.getElementById("compose-card");
+    if (composeCard) composeCard.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
+if (btnJumpFeed) {
+  btnJumpFeed.addEventListener("click", () => {
+    const feedCard = document.getElementById("feed-card");
+    if (feedCard) feedCard.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   if (document.getElementById("map") && typeof initMap === "function") {
-    try { initMap(); } catch (e) { console.error("Map init error:", e); }
+    try {
+      initMap();
+      renderResults(DB.posts.slice(0, 12));
+      renderOnMap(DB.posts, true);
+    } catch (e) {
+      console.error("Map init error:", e);
+    }
   }
 });
