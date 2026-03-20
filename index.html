@@ -22,173 +22,111 @@
   </div>
 </header>
 
-<main class="page-shell">
-  <section class="hero-card card">
-    <div>
-      <p class="hero-kicker">Location-based social demo</p>
-      <h2>Share something nearby in seconds.</h2>
-      <p>Browse posts right away, drop a post anonymously, or log in if you want to post with your username.</p>
-    </div>
-    <div class="hero-actions">
-      <button type="button" id="btn-jump-compose">Create a Post</button>
-      <button type="button" id="btn-jump-feed" class="secondary">Explore Feed</button>
-    </div>
+<main class="app-layout">
+  <section class="card map-panel">
+    <h2>Map</h2>
+    <div id="map"></div>
+    <small class="map-hint">💡 Click the map to set post location</small>
   </section>
 
-  <section class="layout-grid">
-    <div class="left-column">
-      <section class="card compose-card" id="compose-card">
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">Create</p>
-            <h2>Post something nearby</h2>
-          </div>
-          <span id="post-identity" class="identity-badge">Posting as Anonymous</span>
+  <div class="side-panel">
+    <section class="card">
+      <h2>Post</h2>
+      <form id="form-post" enctype="multipart/form-data">
+        <label>Message
+          <textarea name="message" rows="2" placeholder="Say something…" required></textarea>
+        </label>
+
+        <div class="grid-3">
+          <label>Latitude (lat) <input name="lat" type="number" step="any" required></label>
+          <label>Longitude (lon) <input name="lon" type="number" step="any" required></label>
+          <button type="button" id="btn-use-location">Use my location</button>
         </div>
 
-        <form id="form-post" enctype="multipart/form-data">
-          <label>Message
-            <textarea name="message" rows="4" placeholder="What’s happening nearby?" required></textarea>
+        <button type="submit">Post</button>
+        <div class="msg" id="post-msg"></div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Search Nearby Posts</h2>
+      <form id="form-search">
+        <div class="grid-4">
+          <label>Latitude (lat) <input name="lat" type="number" step="any" required></label>
+          <label>Longitude (lon) <input name="lon" type="number" step="any" required></label>
+          <label>Range (km) <input name="range" type="number" min="1" value="200" required></label>
+          <button type="button" id="btn-fill-from-post">Copy from Post</button>
+        </div>
+        <div class="grid-2">
+          <button type="button" id="btn-search-my-loc">Use my location</button>
+          <button type="submit">Search</button>
+        </div>
+        <div class="msg" id="search-msg"></div>
+      </form>
+
+      <div class="state-browse">
+        <div class="grid-2">
+          <label>U.S. State
+            <select id="select-state">
+              <option value="">Select a state…</option>
+              <option value="AL">Alabama (AL)</option>
+              <option value="AZ">Arizona (AZ)</option>
+              <option value="AR">Arkansas (AR)</option>
+              <option value="CA">California (CA)</option>
+              <option value="CO">Colorado (CO)</option>
+              <option value="CT">Connecticut (CT)</option>
+              <option value="DE">Delaware (DE)</option>
+              <option value="DC">District of Columbia (DC)</option>
+              <option value="FL">Florida (FL)</option>
+              <option value="GA">Georgia (GA)</option>
+              <option value="ID">Idaho (ID)</option>
+              <option value="IL">Illinois (IL)</option>
+              <option value="IN">Indiana (IN)</option>
+              <option value="IA">Iowa (IA)</option>
+              <option value="KS">Kansas (KS)</option>
+              <option value="KY">Kentucky (KY)</option>
+              <option value="LA">Louisiana (LA)</option>
+              <option value="ME">Maine (ME)</option>
+              <option value="MD">Maryland (MD)</option>
+              <option value="MA">Massachusetts (MA)</option>
+              <option value="MI">Michigan (MI)</option>
+              <option value="MN">Minnesota (MN)</option>
+              <option value="MS">Mississippi (MS)</option>
+              <option value="MO">Missouri (MO)</option>
+              <option value="MT">Montana (MT)</option>
+              <option value="NE">Nebraska (NE)</option>
+              <option value="NV">Nevada (NV)</option>
+              <option value="NH">New Hampshire (NH)</option>
+              <option value="NJ">New Jersey (NJ)</option>
+              <option value="NM">New Mexico (NM)</option>
+              <option value="NY">New York (NY)</option>
+              <option value="NC">North Carolina (NC)</option>
+              <option value="ND">North Dakota (ND)</option>
+              <option value="OH">Ohio (OH)</option>
+              <option value="OK">Oklahoma (OK)</option>
+              <option value="OR">Oregon (OR)</option>
+              <option value="PA">Pennsylvania (PA)</option>
+              <option value="RI">Rhode Island (RI)</option>
+              <option value="SC">South Carolina (SC)</option>
+              <option value="SD">South Dakota (SD)</option>
+              <option value="TN">Tennessee (TN)</option>
+              <option value="TX">Texas (TX)</option>
+              <option value="UT">Utah (UT)</option>
+              <option value="VT">Vermont (VT)</option>
+              <option value="VA">Virginia (VA)</option>
+              <option value="WA">Washington (WA)</option>
+              <option value="WV">West Virginia (WV)</option>
+              <option value="WI">Wisconsin (WI)</option>
+              <option value="WY">Wyoming (WY)</option>
+            </select>
           </label>
-
-          <input name="lat" type="hidden" required>
-          <input name="lon" type="hidden" required>
-
-          <div class="quick-actions-grid">
-            <button type="button" id="btn-use-location">Use my current location</button>
-            <button type="button" id="btn-pick-on-map" class="secondary">Pick on map</button>
-          </div>
-
-          <div class="location-status" id="post-location-status">No location selected yet.</div>
-
-          <button type="submit" class="primary-wide">Post</button>
-          <div class="msg" id="post-msg"></div>
-        </form>
-      </section>
-
-      <section class="card search-card" id="feed-card">
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">Explore</p>
-            <h2>Nearby feed</h2>
-          </div>
+          <button type="button" id="btn-state-go">Show</button>
         </div>
+      </div>
 
-        <form id="form-search">
-          <input name="lat" type="hidden">
-          <input name="lon" type="hidden">
-
-          <div class="quick-actions-grid search-actions">
-            <button type="button" id="btn-search-my-loc">Near me</button>
-            <button type="button" id="btn-search-map-center" class="secondary">Use map center</button>
-          </div>
-
-          <div class="range-row">
-            <label>Range
-              <select name="range">
-                <option value="10">10 km</option>
-                <option value="25">25 km</option>
-                <option value="50" selected>50 km</option>
-                <option value="100">100 km</option>
-                <option value="200">200 km</option>
-              </select>
-            </label>
-            <button type="submit">Search</button>
-          </div>
-
-          <div class="msg" id="search-msg"></div>
-        </form>
-
-        <div class="state-browse">
-          <div class="section-heading compact-heading">
-            <div>
-              <p class="section-kicker">Browse</p>
-              <h3>Jump to a U.S. state</h3>
-            </div>
-          </div>
-          <div class="grid-2 state-row">
-            <label>U.S. State
-              <select id="select-state">
-                <option value="">Select a state…</option>
-                <option value="AL">Alabama (AL)</option>
-                <option value="AZ">Arizona (AZ)</option>
-                <option value="AR">Arkansas (AR)</option>
-                <option value="CA">California (CA)</option>
-                <option value="CO">Colorado (CO)</option>
-                <option value="CT">Connecticut (CT)</option>
-                <option value="DE">Delaware (DE)</option>
-                <option value="DC">District of Columbia (DC)</option>
-                <option value="FL">Florida (FL)</option>
-                <option value="GA">Georgia (GA)</option>
-                <option value="ID">Idaho (ID)</option>
-                <option value="IL">Illinois (IL)</option>
-                <option value="IN">Indiana (IN)</option>
-                <option value="IA">Iowa (IA)</option>
-                <option value="KS">Kansas (KS)</option>
-                <option value="KY">Kentucky (KY)</option>
-                <option value="LA">Louisiana (LA)</option>
-                <option value="ME">Maine (ME)</option>
-                <option value="MD">Maryland (MD)</option>
-                <option value="MA">Massachusetts (MA)</option>
-                <option value="MI">Michigan (MI)</option>
-                <option value="MN">Minnesota (MN)</option>
-                <option value="MS">Mississippi (MS)</option>
-                <option value="MO">Missouri (MO)</option>
-                <option value="MT">Montana (MT)</option>
-                <option value="NE">Nebraska (NE)</option>
-                <option value="NV">Nevada (NV)</option>
-                <option value="NH">New Hampshire (NH)</option>
-                <option value="NJ">New Jersey (NJ)</option>
-                <option value="NM">New Mexico (NM)</option>
-                <option value="NY">New York (NY)</option>
-                <option value="NC">North Carolina (NC)</option>
-                <option value="ND">North Dakota (ND)</option>
-                <option value="OH">Ohio (OH)</option>
-                <option value="OK">Oklahoma (OK)</option>
-                <option value="OR">Oregon (OR)</option>
-                <option value="PA">Pennsylvania (PA)</option>
-                <option value="RI">Rhode Island (RI)</option>
-                <option value="SC">South Carolina (SC)</option>
-                <option value="SD">South Dakota (SD)</option>
-                <option value="TN">Tennessee (TN)</option>
-                <option value="TX">Texas (TX)</option>
-                <option value="UT">Utah (UT)</option>
-                <option value="VT">Vermont (VT)</option>
-                <option value="VA">Virginia (VA)</option>
-                <option value="WA">Washington (WA)</option>
-                <option value="WV">West Virginia (WV)</option>
-                <option value="WI">Wisconsin (WI)</option>
-                <option value="WY">Wyoming (WY)</option>
-              </select>
-            </label>
-            <button type="button" id="btn-state-go">Show</button>
-          </div>
-        </div>
-
-        <div class="feed-header">
-          <div>
-            <p class="section-kicker">Feed</p>
-            <h3>Latest posts</h3>
-          </div>
-          <p class="feed-hint">Tip: click anywhere on the map to choose a posting location.</p>
-        </div>
-        <div id="results" class="results"></div>
-      </section>
-    </div>
-
-    <aside class="right-column">
-      <section class="card map-card">
-        <div class="section-heading compact-heading map-heading">
-          <div>
-            <p class="section-kicker">Map</p>
-            <h2>Explore visually</h2>
-          </div>
-          <span id="map-hint" class="map-hint">Move the map to refresh nearby posts.</span>
-        </div>
-        <div id="map" class="map-panel"></div>
-      </section>
-    </aside>
-  </section>
+      <div id="results" class="results"></div>
+    </section>
+  </div>
 </main>
 
 <footer>
